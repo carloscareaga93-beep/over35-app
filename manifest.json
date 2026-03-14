@@ -1,0 +1,15 @@
+{
+  "name": "OVER 3.5 · AI Scout",
+  "short_name": "OVER 3.5",
+  "description": "Sistema autónomo de pronóstico over 3.5 goles con IA",
+  "start_url": "./index.html",
+  "display": "standalone",
+  "background_color": "#07070f",
+  "theme_color": "#0a0a12",
+  "orientation": "portrait-primary",
+  "categories": ["sports", "utilities"],
+  "icons": [
+    { "src": "icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any maskable" },
+    { "src": "icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable" }
+  ]
+}
