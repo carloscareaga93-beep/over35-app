@@ -323,13 +323,13 @@
     <div class="loading-title">ANALIZANDO PARTIDO</div>
     <div class="loading-sub" id="loadingMatch">— vs —</div>
     <ul class="loading-steps">
-      <li class="loading-step" id="step1"><span class="step-dot"></span>Buscando datos históricos...</li>
-      <li class="loading-step" id="step2"><span class="step-dot"></span>Calculando xG y métricas ofensivas...</li>
-      <li class="loading-step" id="step3"><span class="step-dot"></span>Analizando forma reciente...</li>
-      <li class="loading-step" id="step4"><span class="step-dot"></span>Verificando bajas e indisponibilidades...</li>
-      <li class="loading-step" id="step5"><span class="step-dot"></span>Procesando H2H y contexto...</li>
-      <li class="loading-step" id="step6"><span class="step-dot"></span>Modelando probabilidades Poisson...</li>
-      <li class="loading-step" id="step7"><span class="step-dot"></span>Generando análisis extraordinario...</li>
+      <li class="loading-step" id="step1"><span class="step-dot"></span>🔍 Buscando forma reciente y estadísticas...</li>
+      <li class="loading-step" id="step2"><span class="step-dot"></span>🔍 Investigando xG y métricas avanzadas...</li>
+      <li class="loading-step" id="step3"><span class="step-dot"></span>🏥 Verificando bajas e indisponibilidades...</li>
+      <li class="loading-step" id="step4"><span class="step-dot"></span>📊 Analizando H2H y contexto de tabla...</li>
+      <li class="loading-step" id="step5"><span class="step-dot"></span>🧮 Modelando probabilidades Poisson...</li>
+      <li class="loading-step" id="step6"><span class="step-dot"></span>⚡ Identificando escenario extraordinario...</li>
+      <li class="loading-step" id="step7"><span class="step-dot"></span>📋 Generando dashboard completo...</li>
     </ul>
   </div>
 
@@ -514,7 +514,7 @@ async function startAnalysis() {
       document.getElementById(STEPS[stepIdx]).className = 'loading-step active';
       stepIdx++;
     }
-  }, 1200);
+  }, 6000);
 
   try {
     const analysis = await fetchAnalysis(home, away, date, league);
