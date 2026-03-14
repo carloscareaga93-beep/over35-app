@@ -7,7 +7,6 @@ const CORS_HEADERS = {
 
 export default async function handler(req, res) {
 
-  // CORS preflight
   if (req.method === 'OPTIONS') {
     Object.entries(CORS_HEADERS).forEach(([k, v]) => res.setHeader(k, v));
     return res.status(200).end();
@@ -21,95 +20,21 @@ export default async function handler(req, res) {
 
   const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
   if (!ANTHROPIC_API_KEY) {
-    return res.status(500).json({ error: 'API key no configurada en variables de entorno de Vercel.' });
+    return res.status(500).json({ error: 'API key no configurada.' });
   }
 
-  const { home, away, date, league } = req.body;
+  const { home, away, date, league } = req.body || {};
   if (!home || !away) {
-    return res.status(400).json({ error: 'Faltan parametros: home y away son requeridos.' });
+    return res.status(400).json({ error: 'Faltan home y away.' });
   }
 
   const dateStr = date || 'proximo partido';
-  const leagueStr = league || 'competicion';
+  const leagueStr = league || 'liga';
 
-  const prompt = `Analiza exhaustivamente el partido: ${home} vs ${away} | Fecha: ${dateStr} | Competicion: ${leagueStr}
-
-Realiza TODAS estas busquedas web para obtener datos reales y actualizados:
-1. "${home} statistics goals scored conceded 2024-25"
-2. "${away} statistics goals scored conceded 2024-25"
-3. "${home} last 5 matches results 2025"
-4. "${away} last 5 matches results 2025"
-5. "${home} injuries suspensions unavailable players March 2025"
-6. "${away} injuries suspensions unavailable players March 2025"
-7. "${home} ${away} head to head history results"
-8. "${home} xG expected goals per game 2024-25"
-9. "${away} xG expected goals per game 2024-25"
-10. "${home} ${away} ${leagueStr} table standings 2025"
-
-Con TODOS los datos reales encontrados, construye el siguiente analisis y responde UNICAMENTE con este JSON valido (sin texto extra, sin backticks, sin markdown):
-
-{
-  "verdict": {
-    "score": 68,
-    "level": "high",
-    "title": "Titulo concreto y especifico del pronostico over 3.5 basado en datos reales",
-    "summary": "3 oraciones explicando por que este es un escenario extraordinario over 3.5 basado en los datos reales encontrados. Menciona estadisticas concretas."
-  },
-  "probabilities": {
-    "home_win": 40,
-    "draw": 26,
-    "away_win": 34,
-    "over_35": 62,
-    "btts": 67
-  },
-  "xg": {
-    "home": "1.78",
-    "home_sub": "xG real encontrado en busqueda con fuente",
-    "away": "1.61",
-    "away_sub": "xG real encontrado en busqueda con fuente"
-  },
-  "goals_avg": {
-    "home": "2.1",
-    "away": "1.7"
-  },
-  "lambda": {
-    "value": "3.39",
-    "sub": "lambda ${home} (ataque) x lambda ${away} (defensa) + inverso, modelo Poisson bivariante"
-  },
-  "form": {
-    "home": {
-      "results": ["W","W","D","L","W"],
-      "text": "Descripcion detallada con resultados REALES y marcadores exactos de los ultimos 5 partidos del equipo local. Incluye goles marcados y recibidos en cada partido, rivales enfrentados y si fue local o visitante."
-    },
-    "away": {
-      "results": ["W","L","W","W","D"],
-      "text": "Descripcion detallada con resultados REALES y marcadores exactos de los ultimos 5 partidos del equipo visitante. Incluye goles marcados y recibidos en cada partido."
-    }
-  },
-  "injuries": {
-    "home": [
-      {"name": "Nombre real del jugador", "status": "Tipo y gravedad real de la lesion o suspension"},
-      {"name": "Otro jugador si aplica", "status": "Estado real"}
-    ],
-    "away": [
-      {"name": "Nombre real del jugador", "status": "Tipo y gravedad real de la lesion o suspension"}
-    ]
-  },
-  "scenario": {
-    "title": "ESCENARIO EXTRAORDINARIO: titulo descriptivo especifico al partido",
-    "body": "Minimo 150 palabras describiendo el escenario plausible de over 3.5 BASADO EN DATOS REALES ENCONTRADOS: vulnerabilidades defensivas reales documentadas con estadisticas, impacto concreto de las bajas en la linea defensiva (si un central clave esta lesionado o un portero titular), estilo de juego documentado de ambos equipos y como interactuan, momentos especificos del partido donde se esperan los goles segun el patron de juego real de estos equipos, por que este escenario esta por encima del consenso del mercado. Todo con base en datos reales encontrados en la busqueda web.",
-    "tags": ["factor real 1", "factor real 2", "factor real 3", "factor real 4", "factor real 5"]
-  },
-  "tactical": "Minimo 120 palabras de analisis tactico basado en datos reales: formaciones documentadas que usan estos equipos, estadisticas reales de presion alta/baja, ritmo de juego, como el estilo ofensivo de un equipo explota las debilidades defensivas del otro segun estadisticas reales de la temporada, zonas especificas del campo donde se generan las oportunidades.",
-  "h2h": "Minimo 80 palabras sobre historial real de enfrentamientos directos: ultimos 5-6 resultados con marcadores concretos, promedio de goles totales en este fixture historicamente, porcentaje de veces que se han visto mas de 2.5 o 3.5 goles en sus enfrentamientos, patron de juego historico entre estos dos equipos.",
-  "context": "Minimo 80 palabras sobre contexto real actual: posicion exacta en la tabla con puntos reales, diferencia con zonas de ascenso/descenso/playoffs, necesidad urgente o no de puntos para cada equipo, etapa de la temporada, si hay partidos importantes proximos que puedan influir en la alineacion, historial reciente de este estadio.",
-  "recommendation": "Minimo 120 palabras con recomendacion profesional y detallada: mercado especifico recomendado (over 3.5 goles / BTTS si/si / resultado exacto / doble oportunidad combinada), odds minimo recomendado para que tenga valor, justificacion del valor esperado positivo frente al consenso del mercado con datos concretos, nivel de confianza del 1 al 10 con justificacion numerica, porcentaje de bankroll sugerido segun el nivel de confianza, los 2-3 principales escenarios de riesgo que podrian anular el pronostico y como de probable son cada uno."
-}
-
-CRITICO: score 0-100 representa tu confianza en que el over 3.5 se da en este escenario extraordinario. level es high si score mayor a 60, medium si entre 40-60, low si menor a 40. USA EXCLUSIVAMENTE datos reales encontrados en las busquedas web. Reemplaza TODO valor de ejemplo con datos reales. JSON valido y completo, absolutamente nada mas.`;
-
+  // ── PASO 1: Recopilar datos con búsqueda web (respuesta libre) ──
+  let researchData = '';
   try {
-    const apiResponse = await fetch('https://api.anthropic.com/v1/messages', {
+    const step1 = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -119,41 +44,82 @@ CRITICO: score 0-100 representa tu confianza en que el over 3.5 se da en este es
       },
       body: JSON.stringify({
         model: 'claude-haiku-4-5-20251001',
-        max_tokens: 5000,
+        max_tokens: 3000,
         tools: [{ type: 'web_search_20250305', name: 'web_search' }],
-        system: 'Eres un analista de futbol de elite especializado en estadistica avanzada, modelos probabilisticos y mercados de apuestas deportivas. Tu fortaleza es identificar escenarios over 3.5 goles que el mercado mayoritario subestima. SIEMPRE realizas multiples busquedas web para obtener datos reales y actualizados antes de analizar. NUNCA inventas ni supones datos: si no encuentras algo, lo indicas claramente. Respondes UNICAMENTE con JSON valido y completo. Cero texto fuera del JSON. Sin backticks. Sin markdown. Solo el objeto JSON con todos los campos completos.',
-        messages: [{ role: 'user', content: prompt }]
+        system: 'Eres un scout de futbol. Buscas datos reales en internet y los resumis en texto claro y organizado. Sin JSON, solo texto con los datos encontrados.',
+        messages: [{
+          role: 'user',
+          content: `Busca datos reales sobre el partido ${home} vs ${away} del ${dateStr} en ${leagueStr}. Necesito:
+1. Goles marcados y recibidos por partido esta temporada 2024-25 de cada equipo
+2. Resultados reales de los ultimos 5 partidos de cada equipo con marcadores
+3. Bajas, lesionados o suspendidos confirmados para este partido
+4. xG por partido de cada equipo esta temporada
+5. Posicion actual en la tabla con puntos
+6. Historial reciente de enfrentamientos directos entre ambos
+
+Busca "${home} form results 2025", "${away} form results 2025", "${home} ${away} injuries March 2025", "${home} ${away} head to head", "${home} xG 2024-25", "${away} xG 2024-25"`
+        }]
       })
     });
 
-    const responseText = await apiResponse.text();
-
-    if (!apiResponse.ok) {
-      return res.status(apiResponse.status).json({
-        error: `Error API Anthropic: ${apiResponse.status} — ${responseText.substring(0, 400)}`
-      });
+    const step1Data = await step1.json();
+    if (step1Data.content) {
+      for (const block of step1Data.content) {
+        if (block.type === 'text') researchData += block.text;
+      }
     }
+  } catch(e) {
+    researchData = 'No se pudieron obtener datos externos. Usa conocimiento general sobre estos equipos.';
+  }
 
-    let data;
-    try { data = JSON.parse(responseText); }
-    catch(e) { return res.status(500).json({ error: 'Respuesta invalida de Anthropic' }); }
+  // ── PASO 2: Generar JSON estructurado basado en los datos ──
+  try {
+    const step2 = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': ANTHROPIC_API_KEY,
+        'anthropic-version': '2023-06-01'
+      },
+      body: JSON.stringify({
+        model: 'claude-haiku-4-5-20251001',
+        max_tokens: 4000,
+        system: `Eres un generador de JSON para analisis de futbol. 
+REGLA ABSOLUTA: Tu respuesta debe comenzar con { y terminar con }. 
+NADA antes del {. NADA despues del }. 
+Solo JSON puro. Ni una sola palabra fuera del JSON.`,
+        messages: [{
+          role: 'user',
+          content: `Partido: ${home} vs ${away} | ${dateStr} | ${leagueStr}
 
-    // Extraer texto de bloques (puede incluir tool_use blocks de web search)
-    let rawText = '';
-    if (data.content && Array.isArray(data.content)) {
-      for (const block of data.content) {
+DATOS REALES RECOPILADOS:
+${researchData}
+
+Con estos datos genera exactamente este JSON (empieza con { directamente):
+
+{"verdict":{"score":65,"level":"high","title":"titulo especifico basado en datos reales","summary":"2-3 oraciones sobre el escenario over 3.5 extraordinario con estadisticas concretas de los datos recopilados"},"probabilities":{"home_win":40,"draw":26,"away_win":34,"over_35":61,"btts":66},"xg":{"home":"1.75","home_sub":"xG real de ${home} segun datos","away":"1.58","away_sub":"xG real de ${away} segun datos"},"goals_avg":{"home":"2.1","away":"1.7"},"lambda":{"value":"3.33","sub":"lambda total Poisson basada en estadisticas reales"},"form":{"home":{"results":["W","W","D","L","W"],"text":"ultimos 5 partidos reales de ${home} con marcadores y rivales"},"away":{"results":["W","L","W","W","D"],"text":"ultimos 5 partidos reales de ${away} con marcadores y rivales"}},"injuries":{"home":[{"name":"nombre real o Sin bajas confirmadas","status":"estado real"}],"away":[{"name":"nombre real o Sin bajas confirmadas","status":"estado real"}]},"scenario":{"title":"ESCENARIO EXTRAORDINARIO: titulo especifico","body":"minimo 130 palabras: escenario plausible over 3.5 basado en datos reales encontrados, vulnerabilidades defensivas reales, impacto de bajas, estilo de juego documentado, por que supera el consenso del mercado"},"tags":["factor1","factor2","factor3","factor4"],"tactical":"minimo 100 palabras analisis tactico real basado en datos encontrados","h2h":"minimo 70 palabras historial real de enfrentamientos con marcadores concretos","context":"minimo 70 palabras contexto real: posicion tabla, puntos, motivaciones actuales","recommendation":"minimo 100 palabras: mercado especifico, nivel confianza 1-10, unidades bankroll, riesgos principales"}`
+        }, {
+          role: 'assistant',
+          content: '{'
+        }]
+      })
+    });
+
+    const step2Text = await step2.text();
+    let step2Data;
+    try { step2Data = JSON.parse(step2Text); }
+    catch(e) { return res.status(500).json({ error: 'Error en paso 2: ' + step2Text.substring(0,200) }); }
+
+    let rawText = '{';
+    if (step2Data.content) {
+      for (const block of step2Data.content) {
         if (block.type === 'text') rawText += block.text;
       }
     }
 
-    if (!rawText) {
-      return res.status(500).json({ error: 'Respuesta vacia. Stop reason: ' + (data.stop_reason || 'unknown') });
-    }
-
-    // Parsear JSON - 4 estrategias progresivas
+    // Parsear JSON
     let parsed = null;
-
-    try { parsed = JSON.parse(rawText.trim()); } catch(e) {}
+    try { parsed = JSON.parse(rawText); } catch(e) {}
 
     if (!parsed) {
       const match = rawText.match(/\{[\s\S]*\}/);
@@ -161,16 +127,20 @@ CRITICO: score 0-100 representa tu confianza en que el over 3.5 se da en este es
     }
 
     if (!parsed) {
-      const clean = rawText.replace(/```json\n?/g,'').replace(/```\n?/g,'').trim();
-      try { parsed = JSON.parse(clean); } catch(e) {}
-      if (!parsed) {
-        const m = clean.match(/\{[\s\S]*\}/);
-        if (m) try { parsed = JSON.parse(m[0]); } catch(e) {}
+      // Intentar reparar JSON truncado
+      let fixedText = rawText.trim();
+      if (!fixedText.endsWith('}')) {
+        const lastBrace = fixedText.lastIndexOf('}');
+        if (lastBrace > 0) fixedText = fixedText.substring(0, lastBrace + 1);
       }
+      try { parsed = JSON.parse(fixedText); } catch(e) {}
     }
 
     if (!parsed) {
-      return res.status(500).json({ error: 'No se pudo parsear el JSON de la IA. Intenta de nuevo.' });
+      return res.status(500).json({ 
+        error: 'Error parseando JSON final. Intenta de nuevo.',
+        debug: rawText.substring(0, 300)
+      });
     }
 
     return res.status(200).json(parsed);
