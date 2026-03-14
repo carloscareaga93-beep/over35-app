@@ -5,20 +5,23 @@ const CORS = {
   'Content-Type': 'application/json'
 };
 
-const callClaude = async (key, system, messages, webSearch = false) => {
-  const headers = {
-    'Content-Type': 'application/json',
-    'x-api-key': key,
-    'anthropic-version': '2023-06-01'
-  };
-  if (webSearch) headers['anthropic-beta'] = 'web-search-2025-03-05';
-  const body = { model: 'claude-haiku-4-5-20251001', max_tokens: 2500, system, messages };
-  if (webSearch) body.tools = [{ type: 'web_search_20250305', name: 'web_search' }];
-  const r = await fetch('https://api.anthropic.com/v1/messages', { method: 'POST', headers, body: JSON.stringify(body) });
-  const data = await r.json();
-  let text = '';
-  if (data.content) for (const b of data.content) if (b.type === 'text') text += b.text;
-  return text.trim();
+const parseJSON = (raw) => {
+  let parsed = null;
+  try { parsed = JSON.parse(raw); return parsed; } catch(e) {}
+  const match = raw.match(/\{[\s\S]*\}/);
+  if (match) try { parsed = JSON.parse(match[0]); return parsed; } catch(e) {}
+  // Reparar llaves faltantes
+  let fixed = raw.trim();
+  let open = 0, inStr = false, esc = false;
+  for (const ch of fixed) {
+    if (esc) { esc = false; continue; }
+    if (ch === '\\') { esc = true; continue; }
+    if (ch === '"') { inStr = !inStr; continue; }
+    if (!inStr) { if (ch === '{') open++; if (ch === '}') open--; }
+  }
+  while (open > 0) { fixed += '}'; open--; }
+  try { parsed = JSON.parse(fixed); return parsed; } catch(e) {}
+  return null;
 };
 
 const safe = (obj, path, def) => {
@@ -29,172 +32,197 @@ const safe = (obj, path, def) => {
   } catch(e) { return def; }
 };
 
-const parseJSON = (raw) => {
-  let parsed = null;
-  const tries = [raw, raw.replace(/```json\n?/g,'').replace(/```\n?/g,'').trim()];
-  for (const t of tries) {
-    if (parsed) break;
-    try { parsed = JSON.parse(t); break; } catch(e) {}
-    const m = t.match(/\{[\s\S]*\}/);
-    if (m) try { parsed = JSON.parse(m[0]); break; } catch(e) {}
-  }
-  if (!parsed) {
-    let fixed = raw.trim();
-    let open = 0, inStr = false, esc = false;
-    for (const ch of fixed) {
-      if (esc) { esc = false; continue; }
-      if (ch === '\\') { esc = true; continue; }
-      if (ch === '"') { inStr = !inStr; continue; }
-      if (!inStr) { if (ch === '{') open++; if (ch === '}') open--; }
-    }
-    while (open > 0) { fixed += '}'; open--; }
-    try { parsed = JSON.parse(fixed); } catch(e) {}
-  }
-  return parsed;
-};
-
 export default async function handler(req, res) {
   Object.entries(CORS).forEach(([k, v]) => res.setHeader(k, v));
   if (req.method === 'OPTIONS') return res.status(200).end();
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method Not Allowed' });
+
   const KEY = process.env.ANTHROPIC_API_KEY;
   if (!KEY) return res.status(500).json({ error: 'API key no configurada.' });
+
   const { home, away, date, league } = req.body || {};
   if (!home || !away) return res.status(400).json({ error: 'Faltan home y away.' });
+
   const dateStr = date || 'proximo partido';
   const leagueStr = league || 'liga';
 
   try {
-    // BLOQUE 1: Forma + estadísticas + tabla
-    const formaStats = await callClaude(KEY,
-      'Scout deportivo. Reportas datos reales concisos. Maximo 400 palabras total.',
-      [{ role: 'user', content: `Busca datos reales 2024-25: "${home} recent results ${leagueStr} 2025" y "${away} recent results ${leagueStr} 2025". Reporta: (1) ultimos 5 resultados de cada equipo con marcadores exactos, (2) promedio goles marcados/recibidos por partido, (3) posicion en tabla con puntos. Maximo 400 palabras.` }],
-      true
-    );
-
-    // BLOQUE 2: Bajas + xG
-    const bajasXG = await callClaude(KEY,
-      'Scout deportivo. Reportas lesiones y xG reales. Maximo 300 palabras.',
-      [{ role: 'user', content: `Busca: "${home} injuries suspensions March 2025" y "${away} injuries suspensions March 2025" y "${home} ${away} xG 2024-25". Reporta jugadores no disponibles con motivo, y xG por partido de cada equipo. Maximo 300 palabras.` }],
-      true
-    );
-
-    // BLOQUE 3: H2H + contexto
-    const h2hCtx = await callClaude(KEY,
-      'Scout deportivo. Reportas H2H y contexto real. Maximo 300 palabras.',
-      [{ role: 'user', content: `Busca: "${home} vs ${away} head to head" y contexto de la ${leagueStr} marzo 2025. Reporta: ultimos 4-5 enfrentamientos con marcadores, promedio goles H2H, situacion en tabla y necesidad de puntos de cada equipo. Maximo 300 palabras.` }],
-      true
-    );
-
-    const research = `FORMA/ESTADISTICAS:\n${formaStats}\n\nBAJAS/xG:\n${bajasXG}\n\nH2H/CONTEXTO:\n${h2hCtx}`;
-
-    // BLOQUE 4: JSON final
-    const step2Res = await fetch('https://api.anthropic.com/v1/messages', {
+    // ═══════════════════════════════════════════════════════
+    // PASO 1 — Investigación exhaustiva con Sonnet + web search
+    // ═══════════════════════════════════════════════════════
+    const researchRes = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'x-api-key': KEY, 'anthropic-version': '2023-06-01' },
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': KEY,
+        'anthropic-version': '2023-06-01',
+        'anthropic-beta': 'web-search-2025-03-05'
+      },
       body: JSON.stringify({
-        model: 'claude-haiku-4-5-20251001',
-        max_tokens: 7000,
-        system: 'Produces JSON valido unicamente. Sin texto previo ni posterior. Sin markdown. Empieza con { termina con }.',
+        model: 'claude-sonnet-4-6',
+        max_tokens: 4000,
+        tools: [{ type: 'web_search_20250305', name: 'web_search' }],
+        system: `Eres un analista de futbol de elite con acceso a datos reales en internet. 
+Tu trabajo es investigar exhaustivamente y reportar SOLO datos verificados y concretos.
+Nunca inventas estadisticas. Si no encuentras algo lo dices claramente.
+Buscas multiples fuentes para cada dato importante.`,
+        messages: [{
+          role: 'user',
+          content: `Necesito un informe de scouting completo y detallado para el partido:
+${home} vs ${away} | ${dateStr} | ${leagueStr}
+
+Realiza todas estas busquedas y reporta los datos encontrados:
+
+1. Busca "${home} ${leagueStr} 2024-25 statistics goals" → reporta goles marcados, recibidos, promedio por partido
+2. Busca "${away} ${leagueStr} 2024-25 statistics goals" → reporta goles marcados, recibidos, promedio por partido  
+3. Busca "${home} last 5 results March 2025" → lista los 5 ultimos resultados con fecha, rival y marcador exacto
+4. Busca "${away} last 5 results March 2025" → lista los 5 ultimos resultados con fecha, rival y marcador exacto
+5. Busca "${home} injuries suspensions unavailable March 2025" → lista jugadores no disponibles con motivo
+6. Busca "${away} injuries suspensions unavailable March 2025" → lista jugadores no disponibles con motivo
+7. Busca "${home} xG expected goals 2024-25" → reporta xG por partido atacando y defendiendo
+8. Busca "${away} xG expected goals 2024-25" → reporta xG por partido atacando y defendiendo
+9. Busca "${home} vs ${away} head to head results history" → lista los ultimos 6 enfrentamientos con marcadores
+10. Busca "${leagueStr} table standings 2025" → posicion actual de ambos equipos con puntos
+
+Organiza el informe en secciones claras. Incluye numeros concretos. Diferencia lo que encontraste de lo que no encontraste.`
+        }]
+      })
+    });
+
+    const researchData = await researchRes.json();
+    let research = '';
+    if (researchData.content) {
+      for (const b of researchData.content) {
+        if (b.type === 'text') research += b.text;
+      }
+    }
+
+    // ═══════════════════════════════════════════════════════
+    // PASO 2 — Análisis profundo y generación JSON con Sonnet
+    // ═══════════════════════════════════════════════════════
+    const analysisRes = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': KEY,
+        'anthropic-version': '2023-06-01'
+      },
+      body: JSON.stringify({
+        model: 'claude-sonnet-4-6',
+        max_tokens: 6000,
+        system: `Eres un analista cuantitativo de futbol especializado en mercados de apuestas deportivas y modelos probabilisticos.
+Tu especialidad es identificar partidos con alta probabilidad de over 3.5 goles que el mercado mayoritario SUBESTIMA — escenarios extraordinarios pero perfectamente plausibles.
+Produces JSON valido solamente. Sin texto previo ni posterior. Sin markdown. El JSON empieza con { y termina con }.`,
         messages: [
           {
             role: 'user',
-            content: `Partido: ${home} vs ${away} | ${dateStr} | ${leagueStr}
+            content: `PARTIDO A ANALIZAR: ${home} (LOCAL) vs ${away} (VISITANTE)
+FECHA: ${dateStr} | COMPETICION: ${leagueStr}
 
-DATOS REALES:
+INFORME DE SCOUTING CON DATOS REALES:
 ${research}
 
-Genera JSON completo con exactamente estas claves. Textos descriptivos, concretos, basados en datos reales encontrados:
+Basandote en estos datos reales, produce un analisis exhaustivo y profesional. El JSON debe contener analisis PROFUNDOS con datos concretos, no generalidades.
 
-{
-  "verdict": {
-    "score": 65,
-    "level": "high",
-    "title": "titulo concreto del pronostico over 3.5",
-    "summary": "3 oraciones sobre el escenario extraordinario over 3.5 con estadisticas reales"
-  },
-  "probabilities": { "home_win": 40, "draw": 27, "away_win": 33, "over_35": 61, "btts": 66 },
-  "xg": {
-    "home": "1.75", "home_sub": "descripcion xG local real",
-    "away": "1.58", "away_sub": "descripcion xG visitante real"
-  },
-  "goals_avg": { "home": "2.1", "away": "1.7" },
-  "lambda": { "value": "3.33", "sub": "lambda ${home} + lambda ${away} modelo Poisson" },
-  "form": {
-    "home": { "results": ["W","W","D","L","W"], "text": "descripcion completa forma local con marcadores reales de cada partido, rivales, tendencia ofensiva/defensiva real" },
-    "away": { "results": ["W","L","W","W","D"], "text": "descripcion completa forma visitante con marcadores reales, rivales, tendencia real" }
-  },
-  "injuries": {
-    "home": [{"name": "jugador real", "status": "tipo lesion/suspension real"}],
-    "away": [{"name": "jugador real", "status": "tipo lesion/suspension real"}]
-  },
-  "scenario": {
-    "title": "ESCENARIO EXTRAORDINARIO: titulo especifico al partido",
-    "body": "descripcion exhaustiva del escenario over 3.5: vulnerabilidades defensivas reales segun estadisticas, impacto concreto de bajas en la zaga, como el ritmo y estilo de juego de ambos equipos genera goles multiples, en que momentos del partido se esperan los tantos segun patron real, por que el mercado subestima este partido y como los datos contradicen las cuotas mayoritarias. Minimo 120 palabras con datos reales.",
-    "tags": ["factor real 1", "factor real 2", "factor real 3", "factor real 4", "factor real 5"]
-  },
-  "tactical": "analisis tactico completo: formaciones reales documentadas, como el sistema ofensivo de cada equipo explota al rival, zonas de peligro reales, transiciones, ritmo de juego esperado segun estadisticas, impacto de la motivacion en el planteamiento. Minimo 100 palabras.",
-  "h2h": "historial real completo: resultados de los ultimos enfrentamientos con marcadores concretos, promedio de goles en este fixture, en cuantos partidos hubo over 2.5 y over 3.5, patron historico observable entre ambos equipos. Minimo 70 palabras.",
-  "context": "contexto real completo: posicion exacta en tabla con puntos, puntos sobre/bajo zona critica, que necesita cada equipo de este partido, como la presion de clasificacion puede afectar el planteamiento y abrir espacios, factores externos relevantes. Minimo 70 palabras.",
-  "recommendation": "recomendacion profesional completa: mercado especifico recomendado con justificacion clara, odds minimo para valor positivo, nivel de confianza 1-10 con justificacion numerica, porcentaje de bankroll sugerido, los 3 principales riesgos con probabilidad estimada de cada uno. Minimo 100 palabras."
-}`
+REGLAS CRITICAS:
+- Cada campo de texto debe citar datos reales del informe de scouting
+- El campo "body" del scenario debe tener MINIMO 200 palabras
+- Los campos tactical, h2h, context, recommendation deben tener MINIMO 120 palabras cada uno
+- Las probabilidades deben reflejar el modelo Poisson basado en los lambda reales encontrados
+- El score debe ser tu estimacion honesta de la probabilidad de over 3.5 (0-100)
+- Si el partido NO es candidato fuerte a over 3.5, di la verdad con score bajo
+
+Estructura JSON requerida (completa todos los campos con datos reales):`,
           },
-          { role: 'assistant', content: '{' }
+          {
+            role: 'assistant',
+            content: `{
+  "verdict": {
+    "score":`
+          }
         ]
       })
     });
 
-    const step2Data = await step2Res.json();
-    let rawJson = '{';
-    if (step2Data.content) for (const b of step2Data.content) if (b.type === 'text') rawJson += b.text;
+    const analysisData = await analysisRes.json();
+    let rawJson = `{
+  "verdict": {
+    "score":`;
+    if (analysisData.content) {
+      for (const b of analysisData.content) {
+        if (b.type === 'text') rawJson += b.text;
+      }
+    }
 
     const parsed = parseJSON(rawJson);
-    if (!parsed) return res.status(500).json({ error: 'Error parseando JSON. Intenta de nuevo.', debug: rawJson.substring(0,400) });
 
+    if (!parsed) {
+      return res.status(500).json({
+        error: 'Error parseando JSON. Intenta de nuevo.',
+        debug: rawJson.substring(0, 500)
+      });
+    }
+
+    // Normalizar estructura garantizando todos los campos
     const result = {
       verdict: {
-        score: safe(parsed,'verdict.score',55),
-        level: safe(parsed,'verdict.level','medium'),
-        title: safe(parsed,'verdict.title','Análisis completado'),
-        summary: safe(parsed,'verdict.summary','Análisis basado en datos reales.')
+        score: safe(parsed, 'verdict.score', 50),
+        level: (() => {
+          const s = safe(parsed, 'verdict.score', 50);
+          return s > 60 ? 'high' : s >= 40 ? 'medium' : 'low';
+        })(),
+        title: safe(parsed, 'verdict.title', 'Análisis completado'),
+        summary: safe(parsed, 'verdict.summary', '—')
       },
       probabilities: {
-        home_win: safe(parsed,'probabilities.home_win',38),
-        draw: safe(parsed,'probabilities.draw',27),
-        away_win: safe(parsed,'probabilities.away_win',35),
-        over_35: safe(parsed,'probabilities.over_35',52),
-        btts: safe(parsed,'probabilities.btts',57)
+        home_win: safe(parsed, 'probabilities.home_win', 38),
+        draw: safe(parsed, 'probabilities.draw', 27),
+        away_win: safe(parsed, 'probabilities.away_win', 35),
+        over_35: safe(parsed, 'probabilities.over_35', 50),
+        btts: safe(parsed, 'probabilities.btts', 55)
       },
       xg: {
-        home: String(safe(parsed,'xg.home','—')),
-        home_sub: safe(parsed,'xg.home_sub','xG por partido'),
-        away: String(safe(parsed,'xg.away','—')),
-        away_sub: safe(parsed,'xg.away_sub','xG por partido')
+        home: String(safe(parsed, 'xg.home', '—')),
+        home_sub: safe(parsed, 'xg.home_sub', '—'),
+        away: String(safe(parsed, 'xg.away', '—')),
+        away_sub: safe(parsed, 'xg.away_sub', '—')
       },
-      goals_avg: { home: String(safe(parsed,'goals_avg.home','—')), away: String(safe(parsed,'goals_avg.away','—')) },
-      lambda: { value: String(safe(parsed,'lambda.value','—')), sub: safe(parsed,'lambda.sub','Modelo Poisson bivariante') },
+      goals_avg: {
+        home: String(safe(parsed, 'goals_avg.home', '—')),
+        away: String(safe(parsed, 'goals_avg.away', '—'))
+      },
+      lambda: {
+        value: String(safe(parsed, 'lambda.value', '—')),
+        sub: safe(parsed, 'lambda.sub', 'Modelo Poisson bivariante')
+      },
       form: {
-        home: { results: safe(parsed,'form.home.results',[]), text: safe(parsed,'form.home.text','—') },
-        away: { results: safe(parsed,'form.away.results',[]), text: safe(parsed,'form.away.text','—') }
+        home: {
+          results: safe(parsed, 'form.home.results', []),
+          text: safe(parsed, 'form.home.text', '—')
+        },
+        away: {
+          results: safe(parsed, 'form.away.results', []),
+          text: safe(parsed, 'form.away.text', '—')
+        }
       },
       injuries: {
-        home: safe(parsed,'injuries.home',[{name:'Sin datos disponibles',status:'Consultar fuentes oficiales'}]),
-        away: safe(parsed,'injuries.away',[{name:'Sin datos disponibles',status:'Consultar fuentes oficiales'}])
+        home: safe(parsed, 'injuries.home', [{ name: 'Sin datos confirmados', status: 'Verificar en medios oficiales' }]),
+        away: safe(parsed, 'injuries.away', [{ name: 'Sin datos confirmados', status: 'Verificar en medios oficiales' }])
       },
       scenario: {
-        title: safe(parsed,'scenario.title','ESCENARIO EXTRAORDINARIO'),
-        body: safe(parsed,'scenario.body','—'),
-        tags: safe(parsed,'scenario.tags',[])
+        title: safe(parsed, 'scenario.title', 'ESCENARIO EXTRAORDINARIO'),
+        body: safe(parsed, 'scenario.body', '—'),
+        tags: safe(parsed, 'scenario.tags', [])
       },
-      tactical: safe(parsed,'tactical','—'),
-      h2h: safe(parsed,'h2h','—'),
-      context: safe(parsed,'context','—'),
-      recommendation: safe(parsed,'recommendation','—')
+      tactical: safe(parsed, 'tactical', '—'),
+      h2h: safe(parsed, 'h2h', '—'),
+      context: safe(parsed, 'context', '—'),
+      recommendation: safe(parsed, 'recommendation', '—')
     };
 
     return res.status(200).json(result);
 
   } catch(err) {
-    return res.status(500).json({ error: 'Error: ' + (err.message || 'desconocido') });
+    return res.status(500).json({ error: 'Error interno: ' + (err.message || 'desconocido') });
   }
 }
